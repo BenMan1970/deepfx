@@ -4,120 +4,149 @@ import pandas as pd
 from datetime import datetime
 import time
 
-# Configuration robuste
+# Configuration éprouvée
 st.set_page_config(
-    page_title="Forex Tracker (Version Stable)",
-    page_icon="💹",
-    layout="wide"
+    page_title="Forex Tracker PRO",
+    layout="centered",
+    initial_sidebar_state="expanded"
 )
 
-# Titre avec style
+# Style CSS professionnel
 st.markdown("""
-<h1 style='text-align: center; color: #1E90FF;'>
-📊 Forex & Or (XAU/USD) - Données Temps Réel
-</h1>
+<style>
+    .header-style {
+        font-size: 26px;
+        font-weight: bold;
+        color: #1E88E5;
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    .data-card {
+        background-color: #f5f5f5;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    .error-message {
+        color: #d32f2f;
+        font-weight: bold;
+    }
+</style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<div style='text-align: center; margin-bottom: 20px;'>
-Application utilisant <a href="https://www.freeforexapi.com">FreeForexAPI.com</a><br>
-<small>Actualisation automatique toutes les 30 secondes</small>
-</div>
-""", unsafe_allow_html=True)
+# Header amélioré
+st.markdown('<p class="header-style">📊 Forex & Or (XAU/USD) - Monitor PRO</p>', unsafe_allow_html=True)
+st.caption("Données temps réel via FreeForexAPI | Actualisation automatique")
 
-# Instruments disponibles avec vérification
-AVAILABLE_PAIRS = {
-    "EUR/USD": "EURUSD",
-    "USD/JPY": "USDJPY",
-    "GBP/USD": "GBPUSD",
-    "XAU/USD (Or)": "XAUUSD",
-    "USD/CHF": "USDCHF",
-    "AUD/USD": "AUDUSD"
+# Paires disponibles avec fallback
+FOREX_PAIRS = {
+    "EUR/USD": {"code": "EURUSD", "fallback": 1.07},
+    "USD/JPY": {"code": "USDJPY", "fallback": 151.50},
+    "GBP/USD": {"code": "GBPUSD", "fallback": 1.25},
+    "XAU/USD": {"code": "XAUUSD", "fallback": 1950.00},
+    "USD/CHF": {"code": "USDCHF", "fallback": 0.91},
+    "AUD/USD": {"code": "AUDUSD", "fallback": 0.66}
 }
 
-# Fonction sécurisée
-def fetch_forex_data(pair_code):
+# Fonction robuste avec fallback
+@st.cache_data(ttl=30, show_spinner=False)
+def get_forex_data(pair_code):
     try:
-        url = f"https://www.freeforexapi.com/api/live?pairs={pair_code}"
-        response = requests.get(url, timeout=15)
+        response = requests.get(
+            f"https://www.freeforexapi.com/api/live?pairs={pair_code}",
+            timeout=10,
+            headers={'Cache-Control': 'no-cache'}
+        )
         
-        # Vérification en 3 étapes
-        if response.status_code != 200:
-            raise ConnectionError(f"Erreur HTTP {response.status_code}")
+        # Double vérification des données
+        if response.status_code == 200:
+            data = response.json()
+            if data and "rates" in data and pair_code in data["rates"]:
+                return {
+                    "success": True,
+                    "rate": data["rates"][pair_code]["rate"],
+                    "timestamp": datetime.fromtimestamp(data["rates"][pair_code]["timestamp"])
+                }
         
-        data = response.json()
+        return {"success": False, "rate": None}
         
-        if not isinstance(data, dict) or "rates" not in data:
-            raise ValueError("Structure de données invalide")
-            
-        if pair_code not in data["rates"]:
-            raise KeyError(f"Paire {pair_code} non disponible")
-            
-        return {
-            "rate": round(data["rates"][pair_code]["rate"], 5),
-            "time": datetime.fromtimestamp(data["rates"][pair_code]["timestamp"])
-        }
-        
-    except Exception as e:
-        st.session_state.last_error = str(e)
-        return None
+    except Exception:
+        return {"success": False, "rate": None}
 
-# Interface
-selected = st.selectbox(
-    "Sélectionnez une paire:",
-    options=list(AVAILABLE_PAIRS.keys()),
-    index=0
-)
+# Initialisation session state
+if "df_history" not in st.session_state:
+    st.session_state.df_history = pd.DataFrame(columns=["pair", "rate", "timestamp"])
 
-pair_code = AVAILABLE_PAIRS[selected]
+# Sidebar professionnelle
+with st.sidebar:
+    st.header("Configuration")
+    selected_pair = st.selectbox(
+        "Paire Forex:",
+        options=list(FOREX_PAIRS.keys()),
+        index=0
+    )
+    auto_refresh = st.checkbox("Actualisation auto (30s)", True)
+    st.markdown("---")
+    st.caption("Dernière mise à jour:")
+    last_update = st.empty()
 
-# Initialisation
-if 'history' not in st.session_state:
-    st.session_state.history = pd.DataFrame(columns=["time", "rate"])
-    st.session_state.last_error = None
+# Conteneurs principaux
+main_container = st.container()
+error_container = st.empty()
+chart_container = st.container()
 
-# Conteneurs
-status_bar = st.empty()
-data_display = st.empty()
-chart = st.empty()
-
-# Boucle principale
-while True:
-    current_time = datetime.now().strftime("%H:%M:%S")
+# Boucle principale optimisée
+def main_loop():
+    pair_info = FOREX_PAIRS[selected_pair]
+    pair_code = pair_info["code"]
     
-    # Récupération des données
-    data = fetch_forex_data(pair_code)
+    # Récupération données
+    data = get_forex_data(pair_code)
     
-    if data:
-        # Mise à jour de l'historique
-        new_entry = pd.DataFrame([{
-            "time": data["time"],
-            "rate": data["rate"]
-        }])
-        
-        st.session_state.history = pd.concat(
-            [st.session_state.history, new_entry]
-        ).drop_duplicates().tail(50)  # Garde seulement les 50 dernières entrées
-        
-        # Affichage
-        with data_display.container():
-            cols = st.columns(3)
-            cols[0].metric("Paire", selected)
-            cols[1].metric("Taux actuel", f"{data['rate']:.5f}")
-            cols[2].metric("Heure", data["time"].strftime("%H:%M:%S"))
+    with main_container:
+        # Carte de données
+        with st.container(border=True):
+            cols = st.columns(2)
+            cols[0].subheader(f"**{selected_pair}**")
             
-        with chart.container():
-            if len(st.session_state.history) > 1:
-                st.line_chart(
-                    st.session_state.history.set_index("time"),
-                    height=350
-                )
-        
-        status_bar.success(f"✅ Données actualisées à {current_time}")
-        st.session_state.last_error = None
-    else:
-        error_msg = st.session_state.last_error or "Erreur inconnue"
-        status_bar.error(f"❌ Dernière erreur ({current_time}): {error_msg}")
+            if data["success"]:
+                rate = data["rate"]
+                cols[1].subheader(f"`{rate:.5f}`")
+                last_update.text(datetime.now().strftime("%H:%M:%S"))
+                
+                # Mise à jour historique
+                new_row = pd.DataFrame([{
+                    "pair": selected_pair,
+                    "rate": rate,
+                    "timestamp": data["timestamp"]
+                }])
+                
+                st.session_state.df_history = pd.concat(
+                    [st.session_state.df_history, new_row]
+                ).drop_duplicates().tail(100)
+                
+            else:
+                cols[1].subheader(f"`{pair_info['fallback']:.5f}` (fallback)")
+                error_container.error("⚠️ Données temporairement indisponibles - Mode fallback activé")
     
-    time.sleep(30)  # 30 secondes entre les requêtes
+    # Graphique
+    with chart_container:
+        if not st.session_state.df_history.empty:
+            chart_data = st.session_state.df_history[
+                st.session_state.df_history["pair"] == selected_pair
+            ].set_index("timestamp")
+            
+            st.line_chart(
+                chart_data["rate"],
+                height=350,
+                use_container_width=True
+            )
+
+# Gestion de l'actualisation
+if auto_refresh:
+    while True:
+        main_loop()
+        time.sleep(30)
+else:
+    main_loop()
   
